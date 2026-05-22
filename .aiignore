@@ -1,0 +1,15 @@
+# Build output — скомпилированные классы, JARы, ZIP плагина
+build/
+
+# Gradle кэш и обёртка
+.gradle/
+gradle/wrapper/gradle-wrapper.jar
+
+# Загруженный Android Studio (~2 GB) и IntelliJ Platform sandbox
+.intellijPlatform/
+
+# Kotlin metadata
+.kotlin/
+
+# macOS
+.DS_Store

@@ -1,0 +1,22 @@
+# Gradle
+.gradle/
+build/
+
+# IntelliJ Platform plugin sandbox & downloaded IDE
+.intellijPlatform/
+
+# Kotlin metadata
+.kotlin/
+
+# IntelliJ IDEA — всё генерируется из build.gradle.kts при открытии проекта
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Logs
+*.log

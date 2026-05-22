@@ -1,0 +1,68 @@
+<idea-plugin>
+    <id>com.androidefficiency.plugin</id>
+    <name>Android Efficiency — Fast Deploy</name>
+    <vendor url="https://github.com/AndroidEfficiency">AndroidEfficiency</vendor>
+
+    <description><![CDATA[
+        <b>Fast Deploy</b> — Ускоренная сборка и деплой Android приложений через терминальные команды.<br/><br/>
+        Заменяет медленную кнопку Run ▶ в Android Studio прямым вызовом
+        <code>./gradlew installDebug</code> с оптимизированными флагами.<br/><br/>
+        <b>Возможности:</b>
+        <ul>
+            <li>Настройка флагов Gradle (--offline, --parallel, --configuration-cache и др.) через чекбоксы</li>
+            <li>Автоматическое определение build flavors из проекта</li>
+            <li>Живой preview итоговой команды</li>
+            <li>Сохранение настроек между перезапусками IDE</li>
+            <li>Встроенный вывод консоли с ANSI-цветами</li>
+            <li>Горячая клавиша для быстрого запуска</li>
+            <li>Поддержка Android CLI (android run, android emulator)</li>
+        </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
+    <depends>org.jetbrains.android</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+
+        <!-- Project-level settings service -->
+        <projectService serviceImplementation="com.androidefficiency.plugin.settings.PluginSettings"/>
+
+        <!-- Settings page in IDE Preferences -->
+        <projectConfigurable
+                instance="com.androidefficiency.plugin.settings.PluginSettingsConfigurable"
+                id="com.androidefficiency.plugin.settings"
+                displayName="Android Efficiency"
+                parentId="tools"/>
+
+        <!-- Tool Window -->
+        <toolWindow
+                id="Fast Deploy"
+                anchor="right"
+                secondary="false"
+                icon="/icons/pluginIcon.svg"
+                factoryClass="com.androidefficiency.plugin.toolwindow.BuildToolWindowFactory"/>
+
+        <!-- Notification group -->
+        <notificationGroup
+                id="AndroidEfficiency.Notifications"
+                displayType="BALLOON"
+                toolWindowId="Fast Deploy"/>
+
+    </extensions>
+
+    <actions>
+        <action
+                id="AndroidEfficiency.QuickBuild"
+                class="com.androidefficiency.plugin.actions.QuickBuildAction"
+                text="Fast Deploy: Run Build"
+                description="Run build with current saved settings"
+                icon="/icons/pluginIcon.svg">
+            <keyboard-shortcut first-keystroke="ctrl shift F10" keymap="$default"/>
+            <keyboard-shortcut first-keystroke="meta shift F10" keymap="Mac OS X 10.5+"/>
+            <add-to-group group-id="RunMenu" anchor="last"/>
+            <add-to-group group-id="MainToolbarRight" anchor="last"/>
+        </action>
+    </actions>
+
+</idea-plugin>
