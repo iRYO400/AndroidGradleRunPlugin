@@ -78,9 +78,26 @@ class PluginSettings : SimplePersistentStateComponent<PluginSettings.State>(Stat
 
         /** Phase 2: Target device serial (empty = first connected device) */
         var targetDevice by string("")
+
+        /** Run command in IDE Terminal instead of the plugin console */
+        var useTerminal by property(true)
+
+        /** When useTerminal=true: reuse the currently active terminal tab instead of opening a new one */
+        var reuseActiveTerminal by property(false)
+
+        // ── Post-build actions ────────────────────────────────────────────────
+        /** When install task succeeds, run `adb shell am start -n <intent>`. */
+        var launchActivityAfterInstall by property(false)
+
+        /** Intent in format "package/ActivityFqn", e.g. "com.foo.app/com.foo.MainActivity". */
+        var launchActivityIntent by string("")
+
+        /** Show a desktop notification when the chained command finishes. */
+        var notifyOnCompletion by property(false)
     }
 
     companion object {
+
         fun getInstance(project: Project): PluginSettings =
             project.getService(PluginSettings::class.java)
     }

@@ -4,7 +4,6 @@ import com.androidefficiency.plugin.settings.PluginSettings
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.openapi.project.Project
 import com.androidefficiency.plugin.util.GradlewResolver
-import java.nio.charset.Charset
 
 /**
  * Composes a Gradle command from the current plugin settings.
@@ -36,7 +35,7 @@ class BuildCommandComposer(
             addParameter(taskName)
             addParameters(flags)
             withWorkDirectory(project.basePath)
-            withCharset(Charset.forName("UTF-8"))
+            withCharset(Charsets.UTF_8)
             // Enable ANSI colors in Gradle output
             withEnvironment("TERM", "xterm-256color")
             withEnvironment("GRADLE_OPTS", "-Dorg.gradle.daemon=false") // handled via flag
@@ -49,10 +48,18 @@ class BuildCommandComposer(
      * Returns a human-readable preview string of the command that would be executed.
      */
     fun getPreviewText(): String {
-        val taskName = buildTaskName()
-        val flags = buildFlags()
-        val allArgs = (listOf(taskName) + flags).joinToString(" \\\n    ")
-        return "./gradlew $allArgs"
+        val gradleParts = listOf(buildTaskName()) + buildFlags()
+        val gradle = "./gradlew " + gradleParts.joinToString(" \\\n    ")
+        return appendPostActions(gradle, joiner = " \\\n  ")
+    }
+
+    /**
+     * Returns a single-line command string for execution in a terminal shell.
+     * Uses `./gradlew` (relative) since the terminal starts in the project directory.
+     */
+    fun getTerminalCommand(): String {
+        val gradle = (listOf("./gradlew", buildTaskName()) + buildFlags()).joinToString(" ")
+        return appendPostActions(gradle, joiner = " ")
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────
@@ -73,6 +80,37 @@ class BuildCommandComposer(
         } else {
             (state.selectedFlavor ?: "").trim()
         }
+    }
+
+    /**
+     * Appends post-build actions to the gradle command.
+     *
+     * Layout:
+     *   gradle [&& am start] [&& osascript "succeeded" || osascript "failed"]
+     *
+     * The success/failure fork uses `&& ... || ...` so the notification always fires:
+     * - if gradle (and am start) succeed → "Build succeeded"
+     * - if anything before the fork fails → "Build failed"
+     */
+    private fun appendPostActions(gradle: String, joiner: String): String {
+        val state = settings.state
+        val isInstall = (state.gradleTask ?: "install") == "install"
+        val intent = (state.launchActivityIntent ?: "").trim()
+        val launchCmd = if (state.launchActivityAfterInstall && isInstall && intent.isNotEmpty()) {
+            "adb shell am start -n \"$intent\""
+        } else null
+
+        val sb = StringBuilder(gradle)
+        if (launchCmd != null) {
+            sb.append(joiner).append("&& ").append(launchCmd)
+        }
+        if (state.notifyOnCompletion) {
+            sb.append(joiner)
+                .append("&& osascript -e 'display notification \"Build succeeded\" with title \"Android Studio\"'")
+            sb.append(joiner)
+                .append("|| osascript -e 'display notification \"Build failed\" with title \"Android Studio\"'")
+        }
+        return sb.toString()
     }
 
     private fun buildFlags(): List<String> = buildList {

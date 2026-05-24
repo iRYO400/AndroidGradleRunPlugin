@@ -2,6 +2,7 @@ package com.androidefficiency.plugin.settings
 
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
@@ -9,7 +10,6 @@ import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
 import javax.swing.BorderFactory
 import javax.swing.BoxLayout
-import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JPanel
 
@@ -23,8 +23,8 @@ class PluginSettingsConfigurable(private val project: Project) : Configurable {
 
     // Build target fields
     private val moduleField = JBTextField()
-    private val taskCombo = JComboBox(arrayOf("install", "assemble", "bundle"))
-    private val buildTypeCombo = JComboBox(arrayOf("Debug", "Release"))
+    private val taskCombo = ComboBox(arrayOf("install", "assemble", "bundle"))
+    private val buildTypeCombo = ComboBox(arrayOf("Debug", "Release"))
 
     // Flag checkboxes
     private val offlineCheck = JBCheckBox("--offline (use cached dependencies, skip network)")

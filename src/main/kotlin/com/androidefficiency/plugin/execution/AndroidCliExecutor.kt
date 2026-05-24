@@ -3,7 +3,6 @@ package com.androidefficiency.plugin.execution
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.openapi.project.Project
-import java.nio.charset.Charset
 
 /**
  * Executor for Android CLI commands (`android` binary).
@@ -29,7 +28,7 @@ class AndroidCliExecutor(private val project: Project) {
     fun isCliAvailable(): Boolean {
         return try {
             val cmd = GeneralCommandLine(CLI_BINARY, "--version")
-                .withCharset(Charset.forName("UTF-8"))
+                .withCharset(Charsets.UTF_8)
             val handler = CapturingProcessHandler(cmd)
             val result = handler.runProcess(CLI_TIMEOUT_MS)
             result.exitCode == 0
@@ -44,7 +43,7 @@ class AndroidCliExecutor(private val project: Project) {
     fun getCliVersion(): String? {
         return try {
             val cmd = GeneralCommandLine(CLI_BINARY, "--version")
-                .withCharset(Charset.forName("UTF-8"))
+                .withCharset(Charsets.UTF_8)
             val handler = CapturingProcessHandler(cmd)
             val result = handler.runProcess(CLI_TIMEOUT_MS)
             if (result.exitCode == 0) result.stdout.trim() else null
@@ -72,7 +71,7 @@ class AndroidCliExecutor(private val project: Project) {
             }
             if (debugMode) addParameter("--debug")
             withWorkDirectory(project.basePath)
-            withCharset(Charset.forName("UTF-8"))
+            withCharset(Charsets.UTF_8)
             withEnvironment("TERM", "xterm-256color")
         }
     }
@@ -87,7 +86,7 @@ class AndroidCliExecutor(private val project: Project) {
             val cmd = GeneralCommandLine(
                 CLI_BINARY, "describe",
                 "--project_dir=${project.basePath}"
-            ).withCharset(Charset.forName("UTF-8"))
+            ).withCharset(Charsets.UTF_8)
 
             val handler = CapturingProcessHandler(cmd)
             val result = handler.runProcess(CLI_TIMEOUT_MS)
@@ -107,7 +106,7 @@ class AndroidCliExecutor(private val project: Project) {
      */
     fun buildEmulatorListCommand(): GeneralCommandLine {
         return GeneralCommandLine(CLI_BINARY, "emulator", "list")
-            .withCharset(Charset.forName("UTF-8"))
+            .withCharset(Charsets.UTF_8)
     }
 
     /**
@@ -115,7 +114,7 @@ class AndroidCliExecutor(private val project: Project) {
      */
     fun buildEmulatorStartCommand(avdName: String): GeneralCommandLine {
         return GeneralCommandLine(CLI_BINARY, "emulator", "start", avdName)
-            .withCharset(Charset.forName("UTF-8"))
+            .withCharset(Charsets.UTF_8)
     }
 
     /**
@@ -123,7 +122,7 @@ class AndroidCliExecutor(private val project: Project) {
      */
     fun buildEmulatorStopCommand(avdName: String): GeneralCommandLine {
         return GeneralCommandLine(CLI_BINARY, "emulator", "stop", avdName)
-            .withCharset(Charset.forName("UTF-8"))
+            .withCharset(Charsets.UTF_8)
     }
 
     // ── Parsing ────────────────────────────────────────────────────────────────

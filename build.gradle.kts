@@ -24,8 +24,8 @@ dependencies {
     intellijPlatform {
         androidStudio(providers.gradleProperty("platformVersion").get())
         bundledPlugin("org.jetbrains.android")
+        bundledPlugin("org.jetbrains.plugins.terminal")
         pluginVerifier()
-        instrumentationTools()
         testFramework(TestFrameworkType.Platform)
     }
 
@@ -73,10 +73,10 @@ tasks {
     }
 
     compileKotlin {
-        kotlinOptions.jvmTarget = "17"
+        compilerOptions.jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 
     compileTestKotlin {
-        kotlinOptions.jvmTarget = "17"
+        compilerOptions.jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }

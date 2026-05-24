@@ -2,7 +2,6 @@ package com.androidefficiency.plugin.util
 
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
-import java.nio.charset.Charset
 
 /**
  * Resolves connected Android devices and running emulators using `adb devices`.
@@ -22,7 +21,7 @@ object DeviceResolver {
     fun listDevices(): List<DeviceInfo> {
         return try {
             val cmd = GeneralCommandLine(ADB_BINARY, "devices", "-l")
-                .withCharset(Charset.forName("UTF-8"))
+                .withCharset(Charsets.UTF_8)
             val handler = CapturingProcessHandler(cmd)
             val result = handler.runProcess(TIMEOUT_MS)
             if (result.exitCode == 0) {
@@ -41,7 +40,7 @@ object DeviceResolver {
     fun isAdbAvailable(): Boolean {
         return try {
             val cmd = GeneralCommandLine(ADB_BINARY, "version")
-                .withCharset(Charset.forName("UTF-8"))
+                .withCharset(Charsets.UTF_8)
             val handler = CapturingProcessHandler(cmd)
             handler.runProcess(TIMEOUT_MS).exitCode == 0
         } catch (e: Exception) {

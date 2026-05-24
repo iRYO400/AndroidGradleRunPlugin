@@ -1,12 +1,8 @@
 package com.androidefficiency.plugin.execution
 
-import com.androidefficiency.plugin.settings.PluginSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
-import org.mockito.kotlin.mock
-import org.mockito.kotlin.whenever
 
 /**
  * Unit tests for [BuildCommandComposer].
@@ -73,10 +69,7 @@ class BuildCommandComposerTest {
     @Test
     fun `multiple flags combined correctly`() {
         val flags = buildFlags(
-            offline = true,
-            parallel = true,
-            configCache = true,
-            buildCache = false
+            offline = true, parallel = true, configCache = true, buildCache = false
         )
         assertTrue(flags.contains("--offline"))
         assertTrue(flags.contains("--parallel"))
@@ -103,13 +96,102 @@ class BuildCommandComposerTest {
         assertTrue(flags.contains("--info"))
     }
 
+    // ── Post-build action tests ───────────────────────────────────────────────
+
+    @Test
+    fun `am start added when install and intent set and flag enabled`() {
+        val tail = buildCommandTail(
+            task = "install", launchEnabled = true, intent = "com.foo/com.foo.Main", notify = false
+        )
+        assertEquals(" && adb shell am start -n \"com.foo/com.foo.Main\"", tail)
+    }
+
+    @Test
+    fun `am start skipped when task is assemble`() {
+        val tail = buildCommandTail(
+            task = "assemble", launchEnabled = true, intent = "com.foo/com.foo.Main", notify = false
+        )
+        assertTrue("no am start for assemble", !tail.contains("adb shell am start"))
+    }
+
+    @Test
+    fun `am start skipped when task is bundle`() {
+        val tail = buildCommandTail(
+            task = "bundle", launchEnabled = true, intent = "com.foo/com.foo.Main", notify = false
+        )
+        assertTrue("no am start for bundle", !tail.contains("adb shell am start"))
+    }
+
+    @Test
+    fun `am start skipped when intent is empty`() {
+        val tail = buildCommandTail(
+            task = "install", launchEnabled = true, intent = "", notify = false
+        )
+        assertEquals("", tail)
+    }
+
+    @Test
+    fun `am start skipped when intent is whitespace only`() {
+        val tail = buildCommandTail(
+            task = "install", launchEnabled = true, intent = "   ", notify = false
+        )
+        assertEquals("", tail)
+    }
+
+    @Test
+    fun `am start skipped when flag disabled`() {
+        val tail = buildCommandTail(
+            task = "install", launchEnabled = false, intent = "com.foo/com.foo.Main", notify = false
+        )
+        assertEquals("", tail)
+    }
+
+    @Test
+    fun `notify adds success and failure forks`() {
+        val tail = buildCommandTail(
+            task = "install", launchEnabled = false, intent = "", notify = true
+        )
+        assertTrue("contains success notify",
+            tail.contains("&& osascript -e 'display notification \"Build succeeded\""))
+        assertTrue("contains failure notify",
+            tail.contains("|| osascript -e 'display notification \"Build failed\""))
+    }
+
+    @Test
+    fun `notify fires even when build fails - failure branch present`() {
+        // The `|| osascript ...failed` branch is what makes the notification fire on failure.
+        // Verifies it's always emitted (not gated on success).
+        val tail = buildCommandTail(
+            task = "install", launchEnabled = true, intent = "com.foo/com.foo.Main", notify = true
+        )
+        assertTrue("failure notification present after ||",
+            tail.contains("|| osascript -e 'display notification \"Build failed\""))
+    }
+
+    @Test
+    fun `am start runs before notification fork`() {
+        val tail = buildCommandTail(
+            task = "install", launchEnabled = true, intent = "com.foo/com.foo.Main", notify = true
+        )
+        val amIdx = tail.indexOf("&& adb shell am start")
+        val successIdx = tail.indexOf("&& osascript")
+        val failureIdx = tail.indexOf("|| osascript")
+        assertTrue("am start before success notif", amIdx in 0 until successIdx)
+        assertTrue("success notif before failure notif", successIdx < failureIdx)
+    }
+
+    @Test
+    fun `empty tail when both flags off`() {
+        val tail = buildCommandTail(
+            task = "install", launchEnabled = false, intent = "com.foo/com.foo.Main", notify = false
+        )
+        assertEquals("", tail)
+    }
+
     // ── Helper functions (mirror BuildCommandComposer logic) ──────────────────
 
     private fun buildTaskName(
-        module: String,
-        task: String,
-        flavor: String,
-        buildType: String
+        module: String, task: String, flavor: String, buildType: String
     ): String {
         val capitalizedFlavor = flavor.replaceFirstChar { it.uppercaseChar() }
         return ":$module:$task$capitalizedFlavor$buildType"
@@ -128,17 +210,33 @@ class BuildCommandComposerTest {
         debug: Boolean = false,
         customFlags: String = ""
     ): List<String> = buildList {
-        if (offline)        add("--offline")
-        if (parallel)       add("--parallel")
-        if (configCache)    add("--configuration-cache")
-        if (buildCache)     add("--build-cache")
-        if (daemon)         add("--daemon")
+        if (offline) add("--offline")
+        if (parallel) add("--parallel")
+        if (configCache) add("--configuration-cache")
+        if (buildCache) add("--build-cache")
+        if (daemon) add("--daemon")
         if (configOnDemand) add("--configure-on-demand")
-        if (dryRun)         add("--dry-run")
-        if (stacktrace)     add("--stacktrace")
-        if (info)           add("--info")
-        if (debug)          add("--debug")
+        if (dryRun) add("--dry-run")
+        if (stacktrace) add("--stacktrace")
+        if (info) add("--info")
+        if (debug) add("--debug")
         val custom = customFlags.trim()
         if (custom.isNotEmpty()) addAll(custom.split(Regex("\\s+")))
+    }
+
+    private fun buildCommandTail(
+        task: String, launchEnabled: Boolean, intent: String, notify: Boolean
+    ): String {
+        val sb = StringBuilder()
+        val isInstall = task == "install"
+        val trimmedIntent = intent.trim()
+        if (launchEnabled && isInstall && trimmedIntent.isNotEmpty()) {
+            sb.append(" && adb shell am start -n \"$trimmedIntent\"")
+        }
+        if (notify) {
+            sb.append(" && osascript -e 'display notification \"Build succeeded\" with title \"Android Studio\"'")
+            sb.append(" || osascript -e 'display notification \"Build failed\" with title \"Android Studio\"'")
+        }
+        return sb.toString()
     }
 }

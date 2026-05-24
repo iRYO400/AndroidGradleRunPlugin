@@ -22,6 +22,7 @@
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.java</depends>
     <depends>org.jetbrains.android</depends>
+    <depends>org.jetbrains.plugins.terminal</depends>
 
     <extensions defaultExtensionNs="com.intellij">
 
@@ -61,7 +62,6 @@
             <keyboard-shortcut first-keystroke="ctrl shift F10" keymap="$default"/>
             <keyboard-shortcut first-keystroke="meta shift F10" keymap="Mac OS X 10.5+"/>
             <add-to-group group-id="RunMenu" anchor="last"/>
-            <add-to-group group-id="MainToolbarRight" anchor="last"/>
         </action>
     </actions>
 

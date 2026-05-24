@@ -22,12 +22,13 @@ object FlavorDetector {
      * or on a background thread for initial detection.
      */
     fun detectFlavors(project: Project): List<String> {
-        // Check cache first
         FlavorCache.get(project.basePath ?: "")?.let { return it }
 
-        val flavors = detectViaAndroidModel(project)
-            .takeIf { it.isNotEmpty() }
-            ?: detectViaBuildGradleParsing(project)
+        // Run both strategies and merge: reflection may return partial results
+        // (e.g. only the active variant), regex fills in the gaps from build.gradle.
+        val fromModel = detectViaAndroidModel(project)
+        val fromFile = detectViaBuildGradleParsing(project)
+        val flavors = (fromModel + fromFile).distinct().sorted()
 
         FlavorCache.put(project.basePath ?: "", flavors)
         return flavors
