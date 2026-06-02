@@ -17,6 +17,7 @@ import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
+import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.Messages
@@ -47,6 +48,7 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
                     if (id.type == ExternalSystemTaskType.RESOLVE_PROJECT &&
                         id.findProject() == project
                     ) {
+                        ApplicationManager.getApplication().invokeLater { showContent() }
                         refreshFlavorsAsync()
                         refreshModulesAsync()
                     }
@@ -101,6 +103,11 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
     private val runButton = JButton("Run in Terminal", AllIcons.Actions.Execute)
     private val copyButton = JButton("Copy", AllIcons.Actions.Copy)
 
+    // Two-card root: a waiting splash while the project is still indexing, then the form.
+    private val rootPanel = JPanel(CardLayout())
+    private var cardsReady = false
+    private var contentShown = false
+
     // ── Build ─────────────────────────────────────────────────────────────────
 
     fun getComponent(): JComponent {
@@ -111,11 +118,84 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
         val topWrapper = JPanel(BorderLayout()).apply {
             add(topPanel, BorderLayout.NORTH)
         }
-
-        return JBScrollPane(topWrapper).apply {
+        val contentScroll = JBScrollPane(topWrapper).apply {
             border = null
             horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
             verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
+        }
+
+        // Loading card first → it's the default shown until the project is ready.
+        rootPanel.add(buildLoadingPanel(), CARD_LOADING)
+        rootPanel.add(contentScroll, CARD_CONTENT)
+        cardsReady = true
+
+        wireReadiness()
+        return rootPanel
+    }
+
+    /**
+     * Shows the splash until the project leaves "dumb" (indexing) mode, then swaps in
+     * the form. [DumbService.runWhenSmart] runs immediately when the project is already
+     * smart, so a freshly-opened, still-indexing project sees the splash and an
+     * already-synced one goes straight to the form — no risk of getting stuck.
+     */
+    private fun wireReadiness() {
+        DumbService.getInstance(project).runWhenSmart {
+            showContent()
+            // Re-detect with the now-available Gradle model for accurate results.
+            refreshModulesAsync()
+            refreshFlavorsAsync()
+        }
+    }
+
+    private fun showContent() {
+        if (!cardsReady || contentShown) return
+        contentShown = true
+        (rootPanel.layout as CardLayout).show(rootPanel, CARD_CONTENT)
+    }
+
+    private fun buildLoadingPanel(): JPanel {
+        val art = JTextArea(ANDROID_ART).apply {
+            font = Font(Font.MONOSPACED, Font.PLAIN, 12)
+            foreground = JBColor.GRAY
+            isEditable = false
+            isFocusable = false
+            isOpaque = false
+            border = null
+        }
+        val message = JLabel(
+            "<html><div style='text-align:center'>" +
+                "⚡ <b>Fast Deploy</b><br/><br/>" +
+                "Waiting for the project to be ready…<br/>" +
+                "<small>indexing / Gradle sync in progress —<br/>" +
+                "the controls will appear automatically</small>" +
+                "</div></html>"
+        ).apply {
+            foreground = JBColor.GRAY
+            horizontalAlignment = SwingConstants.CENTER
+            alignmentX = Component.CENTER_ALIGNMENT
+        }
+        val progress = JProgressBar().apply {
+            isIndeterminate = true
+            maximumSize = Dimension(180, preferredSize.height)
+            alignmentX = Component.CENTER_ALIGNMENT
+        }
+        art.alignmentX = Component.CENTER_ALIGNMENT
+
+        val column = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+            add(art)
+            add(Box.createVerticalStrut(16))
+            add(message)
+            add(Box.createVerticalStrut(16))
+            add(progress)
+        }
+
+        // GridBag centers the column both vertically and horizontally.
+        return JPanel(GridBagLayout()).apply {
+            border = JBUI.Borders.empty(16)
+            add(column, GridBagConstraints())
         }
     }
 
@@ -497,4 +577,20 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
             override fun removeUpdate(e: javax.swing.event.DocumentEvent?) = action()
             override fun changedUpdate(e: javax.swing.event.DocumentEvent?) = action()
         }
+
+    companion object {
+        private const val CARD_LOADING = "loading"
+        private const val CARD_CONTENT = "content"
+
+        private val ANDROID_ART = """
+               \         /
+            .-----------------.
+            | .-.       .-.   |
+            | '-'       '-'   |
+            |                 |
+            |   `._______.'   |
+            '-----------------'
+              /             \
+        """.trimIndent()
+    }
 }
