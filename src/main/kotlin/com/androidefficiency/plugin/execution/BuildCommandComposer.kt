@@ -1,9 +1,7 @@
 package com.androidefficiency.plugin.execution
 
 import com.androidefficiency.plugin.settings.PluginSettings
-import com.intellij.execution.configurations.GeneralCommandLine
-import com.intellij.openapi.project.Project
-import com.androidefficiency.plugin.util.GradlewResolver
+import java.io.File
 
 /**
  * Composes a Gradle command from the current plugin settings.
@@ -18,48 +16,36 @@ import com.androidefficiency.plugin.util.GradlewResolver
  *   - Bundle:      :app:bundleProdRelease
  */
 class BuildCommandComposer(
-    private val project: Project,
     private val settings: PluginSettings
 ) {
 
     /**
-     * Builds a [GeneralCommandLine] ready to be executed.
-     */
-    fun compose(): GeneralCommandLine {
-        val gradlewPath = GradlewResolver.resolve(project)
-        val taskName = buildTaskName()
-        val flags = buildFlags()
-
-        return GeneralCommandLine().apply {
-            exePath = gradlewPath
-            addParameter(taskName)
-            addParameters(flags)
-            withWorkDirectory(project.basePath)
-            withCharset(Charsets.UTF_8)
-            // Enable ANSI colors in Gradle output
-            withEnvironment("TERM", "xterm-256color")
-            withEnvironment("GRADLE_OPTS", "-Dorg.gradle.daemon=false") // handled via flag
-            // Combine stdout and stderr so ConsoleView shows everything together
-            isRedirectErrorStream = false
-        }
-    }
-
-    /**
      * Returns a human-readable preview string of the command that would be executed.
+     * Kept free of execution plumbing (e.g. the completion marker) so it's also
+     * what "Copy" puts on the clipboard.
      */
     fun getPreviewText(): String {
         val gradleParts = listOf(buildTaskName()) + buildFlags()
         val gradle = "./gradlew " + gradleParts.joinToString(" \\\n    ")
-        return appendPostActions(gradle, joiner = " \\\n  ")
+        return appendLaunchActivity(gradle, joiner = " \\\n  ")
     }
 
     /**
      * Returns a single-line command string for execution in a terminal shell.
      * Uses `./gradlew` (relative) since the terminal starts in the project directory.
+     *
+     * @param exitMarker if non-null, a `; printf %s "$?" > <marker>` redirect is appended
+     *        so [BuildCompletionWatcher] can pick up the exit code and fire an IDE
+     *        notification. POSIX shells only (zsh/bash).
      */
-    fun getTerminalCommand(): String {
+    fun getTerminalCommand(exitMarker: File? = null): String {
         val gradle = (listOf("./gradlew", buildTaskName()) + buildFlags()).joinToString(" ")
-        return appendPostActions(gradle, joiner = " ")
+        val withLaunch = appendLaunchActivity(gradle, joiner = " ")
+        return if (exitMarker != null) {
+            "$withLaunch ; printf %s \"\$?\" > '${exitMarker.absolutePath}'"
+        } else {
+            withLaunch
+        }
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────
@@ -83,34 +69,19 @@ class BuildCommandComposer(
     }
 
     /**
-     * Appends post-build actions to the gradle command.
+     * Appends the optional `&& adb shell am start` launch step for install builds.
      *
-     * Layout:
-     *   gradle [&& am start] [&& osascript "succeeded" || osascript "failed"]
-     *
-     * The success/failure fork uses `&& ... || ...` so the notification always fires:
-     * - if gradle (and am start) succeed → "Build succeeded"
-     * - if anything before the fork fails → "Build failed"
+     * Completion notification is no longer chained in the shell — it is handled
+     * natively by [BuildCompletionWatcher] via the exit marker.
      */
-    private fun appendPostActions(gradle: String, joiner: String): String {
+    private fun appendLaunchActivity(gradle: String, joiner: String): String {
         val state = settings.state
         val isInstall = (state.gradleTask ?: "install") == "install"
         val intent = (state.launchActivityIntent ?: "").trim()
-        val launchCmd = if (state.launchActivityAfterInstall && isInstall && intent.isNotEmpty()) {
-            "adb shell am start -n \"$intent\""
-        } else null
-
-        val sb = StringBuilder(gradle)
-        if (launchCmd != null) {
-            sb.append(joiner).append("&& ").append(launchCmd)
+        if (state.launchActivityAfterInstall && isInstall && intent.isNotEmpty()) {
+            return "$gradle${joiner}&& adb shell am start -n \"$intent\""
         }
-        if (state.notifyOnCompletion) {
-            sb.append(joiner)
-                .append("&& osascript -e 'display notification \"Build succeeded\" with title \"Android Studio\"'")
-            sb.append(joiner)
-                .append("|| osascript -e 'display notification \"Build failed\" with title \"Android Studio\"'")
-        }
-        return sb.toString()
+        return gradle
     }
 
     private fun buildFlags(): List<String> = buildList {

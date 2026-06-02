@@ -1,59 +1,30 @@
 package com.androidefficiency.plugin.actions
 
-import com.androidefficiency.plugin.execution.BuildCommandComposer
-import com.androidefficiency.plugin.execution.GradleCommandExecutor
-import com.androidefficiency.plugin.settings.PluginSettings
+import com.androidefficiency.plugin.execution.BuildLauncher
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.wm.ToolWindowManager
 
 /**
  * Action that triggers a build using the currently saved plugin settings.
- * Accessible via keyboard shortcut (Ctrl+Shift+F10 / Cmd+Shift+F10) and toolbar.
+ * Accessible via keyboard shortcut (Ctrl+Shift+F10 / Cmd+Shift+F10) and the Run menu.
  *
- * Activates the Fast Deploy tool window so the console output is visible,
- * then runs the build with the current saved configuration.
+ * Delegates to [BuildLauncher] — the same path the tool-window "Run" button uses —
+ * so the hotkey and the button always behave identically (terminal execution,
+ * launch-activity post-action, completion notification).
  */
 class QuickBuildAction : AnAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val settings = PluginSettings.getInstance(project)
 
-        // Activate the tool window so the user can see console output
-        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Fast Deploy")
-        toolWindow?.activate(null)
+        // Bring the Fast Deploy tool window forward so the user sees the run controls.
+        ToolWindowManager.getInstance(project).getToolWindow("Fast Deploy")?.activate(null)
 
-        try {
-            val composer = BuildCommandComposer(project, settings)
-            val commandLine = composer.compose()
-
-            val executor = GradleCommandExecutor(project)
-            if (executor.isRunning()) {
-                Messages.showInfoMessage(project, "A build is already running. Check the Fast Deploy tool window.", "Fast Deploy")
-                return
-            }
-
-            val consoleView = executor.createConsoleView()
-
-            // If the tool window has content, replace its console; otherwise just run
-            toolWindow?.contentManager?.let { cm ->
-                val content = com.intellij.ui.content.ContentFactory.getInstance()
-                    .createContent(consoleView.component, "Output", false)
-                cm.removeAllContents(true)
-                cm.addContent(content)
-            }
-
-            executor.execute(commandLine = commandLine, consoleView = consoleView)
-
-        } catch (ex: IllegalStateException) {
-            Messages.showErrorDialog(project, ex.message, "Fast Deploy Error")
-        }
+        BuildLauncher.launch(project)
     }
 
     override fun update(e: AnActionEvent) {
         e.presentation.isEnabled = e.project != null
     }
 }
-
