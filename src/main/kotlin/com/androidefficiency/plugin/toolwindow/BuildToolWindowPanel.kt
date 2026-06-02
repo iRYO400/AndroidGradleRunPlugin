@@ -162,6 +162,9 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
             isFocusable = false
             isOpaque = false
             border = null
+            // Pin to preferred size so BoxLayout centers the block instead of stretching it.
+            maximumSize = preferredSize
+            alignmentX = Component.CENTER_ALIGNMENT
         }
         val message = JLabel(
             "<html><div style='text-align:center'>" +
@@ -174,13 +177,13 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
             foreground = JBColor.GRAY
             horizontalAlignment = SwingConstants.CENTER
             alignmentX = Component.CENTER_ALIGNMENT
+            maximumSize = preferredSize
         }
         val progress = JProgressBar().apply {
             isIndeterminate = true
             maximumSize = Dimension(180, preferredSize.height)
             alignmentX = Component.CENTER_ALIGNMENT
         }
-        art.alignmentX = Component.CENTER_ALIGNMENT
 
         val column = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -583,10 +586,10 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
         private const val CARD_CONTENT = "content"
 
         private val ANDROID_ART = """
-               \         /
+                \         /
             .-----------------.
-            | .-.       .-.   |
-            | '-'       '-'   |
+            |   .-.     .-.   |
+            |   '-'     '-'   |
             |                 |
             |   `._______.'   |
             '-----------------'
