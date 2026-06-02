@@ -107,4 +107,63 @@ class FlavorDetectorTest {
         val flavors = FlavorDetector.extractFlavorsFromContent(content)
         assertEquals(listOf("apple", "mango", "zebra"), flavors)
     }
+
+    // ── Multi-dimension flavors ────────────────────────────────────────────────
+
+    @Test
+    fun `detects all flavors across dimensions in Groovy DSL`() {
+        val content = """
+            android {
+                flavorDimensions "environment", "tier"
+                productFlavors {
+                    dev {
+                        dimension "environment"
+                    }
+                    prod {
+                        dimension "environment"
+                    }
+                    free {
+                        dimension "tier"
+                    }
+                    paid {
+                        dimension "tier"
+                    }
+                }
+            }
+        """.trimIndent()
+
+        val flavors = FlavorDetector.extractFlavorsFromContent(content)
+        // All flavors from both dimensions; dimension names/keywords must not leak in.
+        assertEquals(listOf("dev", "free", "paid", "prod"), flavors)
+    }
+
+    @Test
+    fun `detects all flavors across dimensions in Kotlin DSL`() {
+        val content = """
+            android {
+                flavorDimensions += listOf("environment", "tier")
+                productFlavors {
+                    create("dev") { dimension = "environment" }
+                    create("prod") { dimension = "environment" }
+                    create("free") { dimension = "tier" }
+                    create("paid") { dimension = "tier" }
+                }
+            }
+        """.trimIndent()
+
+        val flavors = FlavorDetector.extractFlavorsFromContent(content)
+        assertEquals(listOf("dev", "free", "paid", "prod"), flavors)
+    }
+
+    @Test
+    fun `dimension values are not treated as flavors`() {
+        val content = """
+            productFlavors {
+                create("dev") { dimension = "environment" }
+            }
+        """.trimIndent()
+
+        val flavors = FlavorDetector.extractFlavorsFromContent(content)
+        assertEquals(listOf("dev"), flavors)
+    }
 }

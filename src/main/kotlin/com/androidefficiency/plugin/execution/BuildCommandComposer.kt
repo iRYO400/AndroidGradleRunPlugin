@@ -97,10 +97,47 @@ class BuildCommandComposer(
         if (state.info)               add("--info")
         if (state.debug)              add("--debug")
 
-        // Custom flags (space-separated string → individual args)
+        // Custom flags: split on whitespace but keep quoted values together,
+        // so e.g. -Pkey="a b" stays a single token instead of being torn apart.
         val custom = (state.customFlags ?: "").trim()
         if (custom.isNotEmpty()) {
-            addAll(custom.split(Regex("\\s+")))
+            addAll(splitCustomFlags(custom))
+        }
+    }
+
+    companion object {
+        /**
+         * Splits a custom-flags string into tokens, treating single- and double-quoted
+         * spans as part of the current token (quotes are preserved so the shell still
+         * sees them). Examples:
+         *   `--info --stacktrace`        → ["--info", "--stacktrace"]
+         *   `-Pkey="a b" --foo`          → ["-Pkey=\"a b\"", "--foo"]
+         */
+        internal fun splitCustomFlags(input: String): List<String> {
+            val tokens = mutableListOf<String>()
+            val sb = StringBuilder()
+            var quote: Char? = null
+            for (c in input) {
+                when {
+                    quote != null -> {
+                        sb.append(c)
+                        if (c == quote) quote = null
+                    }
+                    c == '"' || c == '\'' -> {
+                        sb.append(c)
+                        quote = c
+                    }
+                    c.isWhitespace() -> {
+                        if (sb.isNotEmpty()) {
+                            tokens.add(sb.toString())
+                            sb.clear()
+                        }
+                    }
+                    else -> sb.append(c)
+                }
+            }
+            if (sb.isNotEmpty()) tokens.add(sb.toString())
+            return tokens
         }
     }
 }

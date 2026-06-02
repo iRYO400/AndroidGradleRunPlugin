@@ -96,6 +96,24 @@ class BuildCommandComposerTest {
         assertTrue(flags.contains("--info"))
     }
 
+    @Test
+    fun `quoted custom flag with space stays a single token`() {
+        val tokens = BuildCommandComposer.splitCustomFlags("""-Pkey="a b" --foo""")
+        assertEquals(listOf("-Pkey=\"a b\"", "--foo"), tokens)
+    }
+
+    @Test
+    fun `single-quoted custom flag with space stays a single token`() {
+        val tokens = BuildCommandComposer.splitCustomFlags("-Pmsg='hello world'")
+        assertEquals(listOf("-Pmsg='hello world'"), tokens)
+    }
+
+    @Test
+    fun `unquoted custom flags split on whitespace`() {
+        val tokens = BuildCommandComposer.splitCustomFlags("--info   --stacktrace")
+        assertEquals(listOf("--info", "--stacktrace"), tokens)
+    }
+
     // ── Post-build action tests ───────────────────────────────────────────────
 
     @Test
@@ -218,7 +236,7 @@ class BuildCommandComposerTest {
         if (info) add("--info")
         if (debug) add("--debug")
         val custom = customFlags.trim()
-        if (custom.isNotEmpty()) addAll(custom.split(Regex("\\s+")))
+        if (custom.isNotEmpty()) addAll(BuildCommandComposer.splitCustomFlags(custom))
     }
 
     /**
