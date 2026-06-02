@@ -101,7 +101,7 @@ class BuildCommandComposerTest {
     @Test
     fun `am start added when install and intent set and flag enabled`() {
         val tail = buildCommandTail(
-            task = "install", launchEnabled = true, intent = "com.foo/com.foo.Main", notify = false
+            task = "install", launchEnabled = true, intent = "com.foo/com.foo.Main", marker = null
         )
         assertEquals(" && adb shell am start -n \"com.foo/com.foo.Main\"", tail)
     }
@@ -109,7 +109,7 @@ class BuildCommandComposerTest {
     @Test
     fun `am start skipped when task is assemble`() {
         val tail = buildCommandTail(
-            task = "assemble", launchEnabled = true, intent = "com.foo/com.foo.Main", notify = false
+            task = "assemble", launchEnabled = true, intent = "com.foo/com.foo.Main", marker = null
         )
         assertTrue("no am start for assemble", !tail.contains("adb shell am start"))
     }
@@ -117,7 +117,7 @@ class BuildCommandComposerTest {
     @Test
     fun `am start skipped when task is bundle`() {
         val tail = buildCommandTail(
-            task = "bundle", launchEnabled = true, intent = "com.foo/com.foo.Main", notify = false
+            task = "bundle", launchEnabled = true, intent = "com.foo/com.foo.Main", marker = null
         )
         assertTrue("no am start for bundle", !tail.contains("adb shell am start"))
     }
@@ -125,7 +125,7 @@ class BuildCommandComposerTest {
     @Test
     fun `am start skipped when intent is empty`() {
         val tail = buildCommandTail(
-            task = "install", launchEnabled = true, intent = "", notify = false
+            task = "install", launchEnabled = true, intent = "", marker = null
         )
         assertEquals("", tail)
     }
@@ -133,7 +133,7 @@ class BuildCommandComposerTest {
     @Test
     fun `am start skipped when intent is whitespace only`() {
         val tail = buildCommandTail(
-            task = "install", launchEnabled = true, intent = "   ", notify = false
+            task = "install", launchEnabled = true, intent = "   ", marker = null
         )
         assertEquals("", tail)
     }
@@ -141,49 +141,46 @@ class BuildCommandComposerTest {
     @Test
     fun `am start skipped when flag disabled`() {
         val tail = buildCommandTail(
-            task = "install", launchEnabled = false, intent = "com.foo/com.foo.Main", notify = false
+            task = "install", launchEnabled = false, intent = "com.foo/com.foo.Main", marker = null
         )
         assertEquals("", tail)
     }
 
+    // ── Completion marker tests (IDE notification mechanism) ──────────────────
+
     @Test
-    fun `notify adds success and failure forks`() {
+    fun `marker redirect appended when marker provided`() {
         val tail = buildCommandTail(
-            task = "install", launchEnabled = false, intent = "", notify = true
+            task = "install", launchEnabled = false, intent = "", marker = "/tmp/fastdeploy-exit.tmp"
         )
-        assertTrue("contains success notify",
-            tail.contains("&& osascript -e 'display notification \"Build succeeded\""))
-        assertTrue("contains failure notify",
-            tail.contains("|| osascript -e 'display notification \"Build failed\""))
+        assertEquals(" ; printf %s \"\$?\" > '/tmp/fastdeploy-exit.tmp'", tail)
     }
 
     @Test
-    fun `notify fires even when build fails - failure branch present`() {
-        // The `|| osascript ...failed` branch is what makes the notification fire on failure.
-        // Verifies it's always emitted (not gated on success).
+    fun `marker redirect runs after am start`() {
         val tail = buildCommandTail(
-            task = "install", launchEnabled = true, intent = "com.foo/com.foo.Main", notify = true
-        )
-        assertTrue("failure notification present after ||",
-            tail.contains("|| osascript -e 'display notification \"Build failed\""))
-    }
-
-    @Test
-    fun `am start runs before notification fork`() {
-        val tail = buildCommandTail(
-            task = "install", launchEnabled = true, intent = "com.foo/com.foo.Main", notify = true
+            task = "install", launchEnabled = true, intent = "com.foo/com.foo.Main",
+            marker = "/tmp/fastdeploy-exit.tmp"
         )
         val amIdx = tail.indexOf("&& adb shell am start")
-        val successIdx = tail.indexOf("&& osascript")
-        val failureIdx = tail.indexOf("|| osascript")
-        assertTrue("am start before success notif", amIdx in 0 until successIdx)
-        assertTrue("success notif before failure notif", successIdx < failureIdx)
+        val markerIdx = tail.indexOf("; printf")
+        assertTrue("am start present", amIdx >= 0)
+        assertTrue("marker present", markerIdx >= 0)
+        assertTrue("am start before marker redirect", amIdx < markerIdx)
     }
 
     @Test
-    fun `empty tail when both flags off`() {
+    fun `no marker redirect when marker is null`() {
         val tail = buildCommandTail(
-            task = "install", launchEnabled = false, intent = "com.foo/com.foo.Main", notify = false
+            task = "install", launchEnabled = false, intent = "com.foo/com.foo.Main", marker = null
+        )
+        assertTrue("no printf redirect", !tail.contains("printf"))
+    }
+
+    @Test
+    fun `empty tail when no launch and no marker`() {
+        val tail = buildCommandTail(
+            task = "install", launchEnabled = false, intent = "com.foo/com.foo.Main", marker = null
         )
         assertEquals("", tail)
     }
@@ -224,8 +221,13 @@ class BuildCommandComposerTest {
         if (custom.isNotEmpty()) addAll(custom.split(Regex("\\s+")))
     }
 
+    /**
+     * Mirrors the tail [BuildCommandComposer.getTerminalCommand] appends after the
+     * gradle invocation: the optional `&& adb shell am start` launch step, then the
+     * optional completion marker redirect (which feeds BuildCompletionWatcher).
+     */
     private fun buildCommandTail(
-        task: String, launchEnabled: Boolean, intent: String, notify: Boolean
+        task: String, launchEnabled: Boolean, intent: String, marker: String?
     ): String {
         val sb = StringBuilder()
         val isInstall = task == "install"
@@ -233,9 +235,8 @@ class BuildCommandComposerTest {
         if (launchEnabled && isInstall && trimmedIntent.isNotEmpty()) {
             sb.append(" && adb shell am start -n \"$trimmedIntent\"")
         }
-        if (notify) {
-            sb.append(" && osascript -e 'display notification \"Build succeeded\" with title \"Android Studio\"'")
-            sb.append(" || osascript -e 'display notification \"Build failed\" with title \"Android Studio\"'")
+        if (marker != null) {
+            sb.append(" ; printf %s \"\$?\" > '$marker'")
         }
         return sb.toString()
     }

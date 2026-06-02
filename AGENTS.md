@@ -20,15 +20,24 @@ An IntelliJ Platform plugin for **Android Studio** that speeds up the build and 
 Plugin
 ├── PluginSettings           → Stores all settings (PersistentStateComponent)
 ├── BuildToolWindowPanel     → Main UI (Tool Window "Fast Deploy")
-├── BuildCommandComposer     → Builds the ./gradlew command from settings
-├── GradleCommandExecutor    → Runs the command (used directly, not through Panel)
+├── BuildCommandComposer     → Builds the ./gradlew command string from settings
+├── BuildLauncher            → Single entry point: button AND hotkey both call it
 ├── TerminalRunner           → Runs the command in IDE Terminal (TerminalView API)
+├── BuildCompletionWatcher   → Polls exit-marker → native IDE notification
 ├── FlavorDetector           → Auto-detects Android build flavors
 ├── FlavorCache              → In-memory cache for flavors
+├── ModuleDetector           → Auto-detects Gradle modules from settings.gradle(.kts)
 ├── AndroidCliExecutor       → Phase 2: integration with `android` CLI
 ├── DeviceResolver           → Phase 2: device list via adb
-├── QuickBuildAction         → Action (Ctrl+Shift+F10) quick launch
+├── QuickBuildAction         → Action (Ctrl+Shift+F10) → delegates to BuildLauncher
 └── PluginSettingsConfigurable → Page in IDE Settings → Tools
+
+Notification mechanism: the build runs as a detached shell command in the IDE
+Terminal, so the IDE has no process handle. When "Notify on completion" is on,
+BuildLauncher appends `; printf %s "$?" > <marker>` to the command and
+BuildCompletionWatcher polls the marker, firing a native IDE balloon. This needs
+no macOS permission (the old osascript approach silently failed without one).
+POSIX-only — skipped on Windows.
 ```
 
 ### Gradle task naming convention:
@@ -67,13 +76,16 @@ AndroidEfficiencyPlugin/
     │   │   │   ├── BuildToolWindowFactory.kt        ← simple factory
     │   │   │   └── BuildToolWindowPanel.kt          ← all UI in plain Swing
     │   │   ├── execution/
-    │   │   │   ├── BuildCommandComposer.kt          ← builds command (GeneralCommandLine + string)
-    │   │   │   ├── GradleCommandExecutor.kt         ← OSProcessHandler (not used in Panel)
+    │   │   │   ├── BuildCommandComposer.kt          ← builds the command string from settings
+    │   │   │   ├── BuildLauncher.kt                 ← single launch entry (button + hotkey)
     │   │   │   ├── TerminalRunner.kt                ← runs in IDE Terminal (TerminalView)
+    │   │   │   ├── BuildCompletionWatcher.kt        ← exit-marker poll → native IDE notification
     │   │   │   └── AndroidCliExecutor.kt            ← Phase 2
     │   │   ├── flavor/
     │   │   │   ├── FlavorDetector.kt                ← reflection + regex fallback (both always run)
     │   │   │   └── FlavorCache.kt                   ← ConcurrentHashMap
+    │   │   ├── module/
+    │   │   │   └── ModuleDetector.kt                ← parses include(...) from settings.gradle(.kts)
     │   │   ├── actions/
     │   │   │   └── QuickBuildAction.kt              ← AnAction, shortcut Ctrl+Shift+F10
     │   │   └── util/
@@ -85,7 +97,8 @@ AndroidEfficiencyPlugin/
     └── test/
         └── kotlin/com/androidefficiency/plugin/
             ├── execution/BuildCommandComposerTest.kt
-            └── flavor/FlavorDetectorTest.kt
+            ├── flavor/FlavorDetectorTest.kt
+            └── module/ModuleDetectorTest.kt
 ```
 
 ---
@@ -113,7 +126,9 @@ AndroidEfficiencyPlugin/
 ### TODO
 
 - [ ] Phase 2 UI — Gradle/CLI toggle and device dropdown in `BuildToolWindowPanel`
-- [ ] Multi-module support — `ComboBox` for module selection instead of manual input
+- [x] Multi-module support — editable `ComboBox` for module selection (auto-detected from settings.gradle)
+- [x] Native IDE completion notification (replaced macOS osascript)
+- [x] Hotkey and Run button unified via `BuildLauncher`
 - [ ] Migrate TerminalRunner to the new Reworked Terminal API (available from 2025.3, currently experimental)
 - [ ] Test on a project with multi-dimension flavors
 
@@ -214,10 +229,10 @@ Different Android projects have different flavors and flags. Stored in `.idea/An
 `GradleAndroidModel` is an internal API that changes between versions. Reflection + regex fallback ensures compatibility. Both methods always run and results are merged.
 
 ### Why no Plugin Console?
-The built-in ConsoleView caused UX problems: it appeared at the bottom on launch and shrank the config area with a scrollbar. IDE Terminal is the native solution without these issues.
+The built-in ConsoleView caused UX problems: it appeared at the bottom on launch and shrank the config area with a scrollbar. IDE Terminal is the native solution without these issues. The dead "Plugin Console" radio button and the unused `GradleCommandExecutor` (OSProcessHandler + ConsoleView) were removed; the only run mode is the IDE Terminal, with just a "Use active terminal tab" checkbox.
 
-### Why is the Plugin Console radio button disabled?
-Left as a placeholder for possible future integration, but without an implementation.
+### Why a marker file for notifications instead of osascript?
+The terminal command is detached, so the IDE can't observe its exit. The old `osascript` desktop notification silently did nothing when macOS notification permission was absent (and can't be queried programmatically). Instead the shell writes `$?` to a temp marker; `BuildCompletionWatcher` polls it and fires a native IDE balloon — no permission needed, cross-platform-friendly (POSIX shells).
 
 ---
 

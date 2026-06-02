@@ -1,9 +1,10 @@
 package com.androidefficiency.plugin.toolwindow
 
 import com.androidefficiency.plugin.execution.BuildCommandComposer
-import com.androidefficiency.plugin.execution.TerminalRunner
+import com.androidefficiency.plugin.execution.BuildLauncher
 import com.androidefficiency.plugin.flavor.FlavorCache
 import com.androidefficiency.plugin.flavor.FlavorDetector
+import com.androidefficiency.plugin.module.ModuleDetector
 import com.androidefficiency.plugin.settings.PluginSettings
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
@@ -29,15 +30,16 @@ import java.awt.*
 import java.awt.datatransfer.StringSelection
 import javax.swing.*
 import javax.swing.border.TitledBorder
+import javax.swing.text.JTextComponent
 
 class BuildToolWindowPanel(private val project: Project, parentDisposable: Disposable) {
 
     private val settings = PluginSettings.getInstance(project)
 
     init {
-        // Re-detect flavors after every Gradle Sync.
+        // Re-detect modules & flavors after every Gradle Sync.
         // ExternalSystemProgressNotificationManager is app-level, so filter by project.
-        val disposable = Disposer.newDisposable("FastDeploy:FlavorSync")
+        val disposable = Disposer.newDisposable("FastDeploy:GradleSync")
         Disposer.register(parentDisposable, disposable)
         ExternalSystemProgressNotificationManager.getInstance()
             .addNotificationListener(object : ExternalSystemTaskNotificationListenerAdapter(null) {
@@ -46,13 +48,18 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
                         id.findProject() == project
                     ) {
                         refreshFlavorsAsync()
+                        refreshModulesAsync()
                     }
                 }
             }, disposable)
     }
 
     // ── UI Components ─────────────────────────────────────────────────────────
-    private val moduleField = JBTextField(settings.state.selectedModule ?: "app")
+    // Editable combo: shows auto-detected Gradle modules, but the user can still type one.
+    private val moduleCombo = ComboBox<String>().apply {
+        isEditable = true
+        selectedItem = settings.state.selectedModule ?: "app"
+    }
     private val taskGroup = ButtonGroup()
     private val installRadio = JRadioButton("install", (settings.state.gradleTask ?: "install") == "install")
     private val assembleRadio = JRadioButton("assemble", (settings.state.gradleTask ?: "install") == "assemble")
@@ -82,16 +89,14 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
 
     private val launchActivityCheck = JCheckBox("Launch activity:", settings.state.launchActivityAfterInstall)
     private val launchIntentField = JBTextField(settings.state.launchActivityIntent ?: "", 24)
-    private val notifyCheck = JCheckBox("Notify on completion (macOS)", settings.state.notifyOnCompletion)
+    private val notifyCheck = JCheckBox("Notify on completion (IDE)", settings.state.notifyOnCompletion)
 
     private val previewLabel = JLabel().apply {
         font = Font(Font.MONOSPACED, Font.PLAIN, 11)
         foreground = JBColor.GRAY
     }
 
-    private val useTerminalRadio = JRadioButton("IDE Terminal", true)
-    private val useConsoleRadio = JRadioButton("Plugin Console", false).apply { isEnabled = false }
-    private val reuseTerminalCheck = JCheckBox("Use active tab", settings.state.reuseActiveTerminal)
+    private val reuseTerminalCheck = JCheckBox("Use active terminal tab", settings.state.reuseActiveTerminal)
 
     private val runButton = JButton("Run in Terminal", AllIcons.Actions.Execute)
     private val copyButton = JButton("Copy", AllIcons.Actions.Copy)
@@ -142,6 +147,9 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
         // Initial preview update
         updatePreview()
 
+        // Populate the module dropdown
+        refreshModulesAsync()
+
         // Wire up all change listeners
         attachChangeListeners()
 
@@ -151,13 +159,13 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
     private fun buildModuleTaskSection(): JPanel {
         val panel = titledPanel("Build Target")
 
-        // Module row — BorderLayout so the text field fills remaining width
+        // Module row — BorderLayout so the combo fills remaining width
         val moduleRow = JPanel(BorderLayout(4, 2)).apply {
             alignmentX = Component.LEFT_ALIGNMENT
             border = JBUI.Borders.emptyLeft(4)
         }
         moduleRow.add(JBLabel("Module:"), BorderLayout.WEST)
-        moduleRow.add(moduleField, BorderLayout.CENTER)
+        moduleRow.add(moduleCombo, BorderLayout.CENTER)
         panel.add(moduleRow)
 
         // Task row
@@ -290,23 +298,17 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
     }
 
     private fun buildRunModeSection(): JPanel {
-        val panel = titledPanel("Run Mode")
-
+        val panel = titledPanel("Terminal")
+        reuseTerminalCheck.toolTipText =
+            "Reuse the currently selected terminal tab instead of opening a new 'Fast Deploy' tab"
+        reuseTerminalCheck.alignmentX = Component.LEFT_ALIGNMENT
         reuseTerminalCheck.addActionListener { saveAndRefresh() }
 
-        val terminalRow = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
+        val row = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
             alignmentX = Component.LEFT_ALIGNMENT
         }
-        terminalRow.add(useTerminalRadio)
-        terminalRow.add(reuseTerminalCheck)
-
-        val consoleRow = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
-            alignmentX = Component.LEFT_ALIGNMENT
-        }
-        consoleRow.add(useConsoleRadio)
-
-        panel.add(terminalRow)
-        panel.add(consoleRow)
+        row.add(reuseTerminalCheck)
+        panel.add(row)
         return panel
     }
 
@@ -326,7 +328,8 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
     private fun attachChangeListeners() {
         val onChange = { saveAndRefresh() }
 
-        moduleField.document.addDocumentListener(simpleDocumentListener(onChange))
+        moduleEditor()?.document?.addDocumentListener(simpleDocumentListener(onChange))
+        moduleCombo.addActionListener { saveAndRefresh() }
         customFlagsField.document.addDocumentListener(simpleDocumentListener(onChange))
         manualFlavorField.document.addDocumentListener(simpleDocumentListener(onChange))
         launchIntentField.document.addDocumentListener(simpleDocumentListener(onChange))
@@ -352,9 +355,16 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
 
     // ── Settings persistence ──────────────────────────────────────────────────
 
+    /** Current module text from the editable combo (typed value takes precedence). */
+    private fun currentModule(): String =
+        (moduleCombo.editor.item as? String ?: moduleCombo.selectedItem as? String).orEmpty().trim()
+
+    private fun moduleEditor(): JTextComponent? =
+        moduleCombo.editor.editorComponent as? JTextComponent
+
     private fun persistSettings() {
         val s = settings.state
-        s.selectedModule = moduleField.text.trim()
+        s.selectedModule = currentModule()
         s.gradleTask = when {
             installRadio.isSelected -> "install"
             assembleRadio.isSelected -> "assemble"
@@ -386,7 +396,7 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
 
     private fun updatePreview() {
         try {
-            val composer = BuildCommandComposer(project, settings)
+            val composer = BuildCommandComposer(settings)
             val preview = composer.getPreviewText()
             previewLabel.text = "<html><pre style='margin:0'>${preview.replace("\n", "<br/>")}</pre></html>"
         } catch (e: Exception) {
@@ -398,14 +408,13 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
 
     private fun runBuild() {
         persistSettings()
-        val composer = BuildCommandComposer(project, settings)
-        TerminalRunner.run(project, composer.getTerminalCommand(), settings.state.reuseActiveTerminal)
+        BuildLauncher.launch(project)
     }
 
     private fun copyCommandToClipboard() {
         try {
             persistSettings()
-            val text = BuildCommandComposer(project, settings).getPreviewText()
+            val text = BuildCommandComposer(settings).getPreviewText()
             CopyPasteManager.getInstance().setContents(StringSelection(text))
         } catch (e: Exception) {
             Messages.showErrorDialog(project, e.message, "Fast Deploy")
@@ -439,6 +448,31 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
             flavorCombo.selectedItem = currentSelection
         }
         flavorCombo.isEnabled = !manualFlavorCheck.isSelected
+        updatePreview()
+    }
+
+    // ── Module detection ──────────────────────────────────────────────────────
+
+    private fun refreshModulesAsync() {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(
+            project, "Fast Deploy: Detecting modules…", false
+        ) {
+            override fun run(indicator: ProgressIndicator) {
+                val modules = ModuleDetector.detectModules(project)
+                ApplicationManager.getApplication().invokeLater {
+                    updateModuleCombo(modules)
+                }
+            }
+        })
+    }
+
+    private fun updateModuleCombo(modules: List<String>) {
+        // Preserve whatever the user has selected/typed so detection never clobbers it.
+        val current = currentModule().ifEmpty { settings.state.selectedModule ?: "app" }
+        moduleCombo.removeAllItems()
+        modules.forEach { moduleCombo.addItem(it) }
+        if (modules.isEmpty()) moduleCombo.addItem("app")
+        moduleCombo.selectedItem = current  // editable combo accepts values outside the list
         updatePreview()
     }
 

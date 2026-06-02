@@ -10,12 +10,12 @@
         <b>Возможности:</b>
         <ul>
             <li>Настройка флагов Gradle (--offline, --parallel, --configuration-cache и др.) через чекбоксы</li>
-            <li>Автоматическое определение build flavors из проекта</li>
+            <li>Автоматическое определение модулей и build flavors из проекта</li>
             <li>Живой preview итоговой команды</li>
             <li>Сохранение настроек между перезапусками IDE</li>
-            <li>Встроенный вывод консоли с ANSI-цветами</li>
+            <li>Запуск в IDE-терминале (PTY, ANSI-цвета, история)</li>
+            <li>Нативное уведомление IDE по завершении сборки</li>
             <li>Горячая клавиша для быстрого запуска</li>
-            <li>Поддержка Android CLI (android run, android emulator)</li>
         </ul>
     ]]></description>
 

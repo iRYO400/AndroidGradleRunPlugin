@@ -79,10 +79,7 @@ class PluginSettings : SimplePersistentStateComponent<PluginSettings.State>(Stat
         /** Phase 2: Target device serial (empty = first connected device) */
         var targetDevice by string("")
 
-        /** Run command in IDE Terminal instead of the plugin console */
-        var useTerminal by property(true)
-
-        /** When useTerminal=true: reuse the currently active terminal tab instead of opening a new one */
+        /** Reuse the currently active terminal tab instead of opening a new "Fast Deploy" tab */
         var reuseActiveTerminal by property(false)
 
         // ── Post-build actions ────────────────────────────────────────────────
