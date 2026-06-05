@@ -27,10 +27,14 @@ Plugin
 ├── FlavorDetector           → Auto-detects Android build flavors
 ├── FlavorCache              → In-memory cache for flavors
 ├── ModuleDetector           → Auto-detects Gradle modules from settings.gradle(.kts)
-├── AndroidCliExecutor       → Phase 2: integration with `android` CLI
-├── DeviceResolver           → Phase 2: device list via adb
-├── QuickBuildAction         → Action (Ctrl+Shift+F10) → delegates to BuildLauncher
-└── PluginSettingsConfigurable → Page in IDE Settings → Tools
+├── AndroidCliExecutor       → `android run` / emulator (CLI mode availability + commands)
+├── DeviceResolver           → connected devices via adb (device dropdown)
+└── QuickBuildAction         → Action (Ctrl+Shift+F10) → delegates to BuildLauncher
+
+Run-via modes: Gradle (`./gradlew …`, with `ANDROID_SERIAL=` prefix when a device is
+chosen) or Android CLI (`android run --device=…`). The CLI radio is disabled if the
+`android` binary isn't on PATH. There is no separate settings page — all configuration
+lives in the Fast Deploy tool window (settings persist via the PluginSettings service).
 
 Notification mechanism: the build runs as a detached shell command in the IDE
 Terminal, so the IDE has no process handle. When "Notify on completion" is on,
@@ -70,8 +74,7 @@ AndroidEfficiencyPlugin/
     ├── main/
     │   ├── kotlin/com/androidefficiency/plugin/
     │   │   ├── settings/
-    │   │   │   ├── PluginSettings.kt                ← @Service PROJECT level, BaseState
-    │   │   │   └── PluginSettingsConfigurable.kt    ← Swing FormBuilder (NOT Kotlin UI DSL)
+    │   │   │   └── PluginSettings.kt                ← @Service PROJECT level, BaseState (no separate settings page)
     │   │   ├── toolwindow/
     │   │   │   ├── BuildToolWindowFactory.kt        ← simple factory
     │   │   │   └── BuildToolWindowPanel.kt          ← all UI in plain Swing
@@ -117,7 +120,6 @@ AndroidEfficiencyPlugin/
 - [x] BuildToolWindowPanel — full UI: flag checkboxes, flavor picker, live preview
 - [x] BuildToolWindowFactory
 - [x] QuickBuildAction (Ctrl+Shift+F10)
-- [x] PluginSettingsConfigurable (Swing FormBuilder)
 - [x] GradlewResolver
 - [x] AndroidCliExecutor, DeviceResolver (Phase 2, not integrated into UI)
 - [x] Unit tests (BuildCommandComposerTest, FlavorDetectorTest)
@@ -125,12 +127,14 @@ AndroidEfficiencyPlugin/
 
 ### TODO
 
-- [ ] Phase 2 UI — Gradle/CLI toggle and device dropdown in `BuildToolWindowPanel`
+- [x] Phase 2 UI — Gradle/CLI toggle and device dropdown in `BuildToolWindowPanel`
 - [x] Multi-module support — editable `ComboBox` for module selection (auto-detected from settings.gradle)
 - [x] Native IDE completion notification (replaced macOS osascript)
 - [x] Hotkey and Run button unified via `BuildLauncher`
+- [x] Test on a project with multi-dimension flavors (FlavorDetectorTest)
+- [x] Removed the separate settings page — all config lives in the tool window
 - [ ] Migrate TerminalRunner to the new Reworked Terminal API (available from 2025.3, currently experimental)
-- [ ] Test on a project with multi-dimension flavors
+- [ ] Phase 2+: emulator/AVD management & `android describe`/`screen` (AndroidCliExecutor groundwork exists)
 
 ---
 

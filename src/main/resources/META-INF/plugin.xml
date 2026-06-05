@@ -29,13 +29,6 @@
         <!-- Project-level settings service -->
         <projectService serviceImplementation="com.androidefficiency.plugin.settings.PluginSettings"/>
 
-        <!-- Settings page in IDE Preferences -->
-        <projectConfigurable
-                instance="com.androidefficiency.plugin.settings.PluginSettingsConfigurable"
-                id="com.androidefficiency.plugin.settings"
-                displayName="Android Efficiency"
-                parentId="tools"/>
-
         <!-- Tool Window -->
         <toolWindow
                 id="Fast Deploy"

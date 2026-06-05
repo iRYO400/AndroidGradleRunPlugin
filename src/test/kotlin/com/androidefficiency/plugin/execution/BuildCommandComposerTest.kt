@@ -203,6 +203,41 @@ class BuildCommandComposerTest {
         assertEquals("", tail)
     }
 
+    // ── Device targeting & Android CLI mode ─────────────────────────────────────
+
+    @Test
+    fun `am start targets device with adb -s when device selected`() {
+        val tail = buildCommandTail(
+            task = "install", launchEnabled = true, intent = "com.foo/com.foo.Main",
+            marker = null, device = "emulator-5554"
+        )
+        assertEquals(" && adb -s 'emulator-5554' shell am start -n \"com.foo/com.foo.Main\"", tail)
+    }
+
+    @Test
+    fun `am start uses plain adb when no device selected`() {
+        val tail = buildCommandTail(
+            task = "install", launchEnabled = true, intent = "com.foo/com.foo.Main", marker = null
+        )
+        assertEquals(" && adb shell am start -n \"com.foo/com.foo.Main\"", tail)
+    }
+
+    @Test
+    fun `gradle serial prefix present when device selected`() {
+        assertEquals("ANDROID_SERIAL='R5CT80MXXXX' ", serialPrefix("R5CT80MXXXX"))
+        assertEquals("", serialPrefix(""))
+    }
+
+    @Test
+    fun `cli command without device`() {
+        assertEquals("android run", buildCliCommand(""))
+    }
+
+    @Test
+    fun `cli command with device`() {
+        assertEquals("android run --device='emulator-5554'", buildCliCommand("emulator-5554"))
+    }
+
     // ── Helper functions (mirror BuildCommandComposer logic) ──────────────────
 
     private fun buildTaskName(
@@ -245,17 +280,25 @@ class BuildCommandComposerTest {
      * optional completion marker redirect (which feeds BuildCompletionWatcher).
      */
     private fun buildCommandTail(
-        task: String, launchEnabled: Boolean, intent: String, marker: String?
+        task: String, launchEnabled: Boolean, intent: String, marker: String?, device: String = ""
     ): String {
         val sb = StringBuilder()
         val isInstall = task == "install"
         val trimmedIntent = intent.trim()
         if (launchEnabled && isInstall && trimmedIntent.isNotEmpty()) {
-            sb.append(" && adb shell am start -n \"$trimmedIntent\"")
+            val adb = if (device.isNotEmpty()) "adb -s '$device'" else "adb"
+            sb.append(" && $adb shell am start -n \"$trimmedIntent\"")
         }
         if (marker != null) {
             sb.append(" ; printf %s \"\$?\" > '$marker'")
         }
         return sb.toString()
     }
+
+    // Mirror of BuildCommandComposer.buildCliCommand / serialPrefix.
+    private fun buildCliCommand(device: String): String =
+        if (device.isNotEmpty()) "android run --device='$device'" else "android run"
+
+    private fun serialPrefix(device: String): String =
+        if (device.isNotEmpty()) "ANDROID_SERIAL='$device' " else ""
 }

@@ -25,8 +25,9 @@ class BuildCommandComposer(
      * what "Copy" puts on the clipboard.
      */
     fun getPreviewText(): String {
+        if (useCli()) return buildCliCommand()
         val gradleParts = listOf(buildTaskName()) + buildFlags()
-        val gradle = "./gradlew " + gradleParts.joinToString(" \\\n    ")
+        val gradle = serialPrefix() + "./gradlew " + gradleParts.joinToString(" \\\n    ")
         return appendLaunchActivity(gradle, joiner = " \\\n  ")
     }
 
@@ -39,16 +40,44 @@ class BuildCommandComposer(
      *        notification. POSIX shells only (zsh/bash).
      */
     fun getTerminalCommand(exitMarker: File? = null): String {
-        val gradle = (listOf("./gradlew", buildTaskName()) + buildFlags()).joinToString(" ")
-        val withLaunch = appendLaunchActivity(gradle, joiner = " ")
-        return if (exitMarker != null) {
-            "$withLaunch ; printf %s \"\$?\" > '${exitMarker.absolutePath}'"
+        val base = if (useCli()) {
+            buildCliCommand()
         } else {
-            withLaunch
+            val gradle = serialPrefix() + (listOf("./gradlew", buildTaskName()) + buildFlags()).joinToString(" ")
+            appendLaunchActivity(gradle, joiner = " ")
+        }
+        return if (exitMarker != null) {
+            "$base ; printf %s \"\$?\" > '${exitMarker.absolutePath}'"
+        } else {
+            base
         }
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────
+
+    private fun useCli(): Boolean = settings.state.useAndroidCli
+
+    /** Selected device serial, or empty for "default / all connected". */
+    private fun device(): String = (settings.state.targetDevice ?: "").trim()
+
+    /**
+     * Builds the Android CLI deploy command: `android run [--device=<serial>]`.
+     * `android run` builds, installs and launches the app on its own, so the
+     * Gradle flags / flavor / launch-activity options do not apply here.
+     */
+    private fun buildCliCommand(): String {
+        val dev = device()
+        return if (dev.isNotEmpty()) "android run --device='$dev'" else "android run"
+    }
+
+    /**
+     * `ANDROID_SERIAL='<serial>' ` prefix so a Gradle install targets the chosen
+     * device instead of every connected one. Empty when no device is selected.
+     */
+    private fun serialPrefix(): String {
+        val dev = device()
+        return if (dev.isNotEmpty()) "ANDROID_SERIAL='$dev' " else ""
+    }
 
     private fun buildTaskName(): String {
         val state = settings.state
@@ -79,7 +108,9 @@ class BuildCommandComposer(
         val isInstall = (state.gradleTask ?: "install") == "install"
         val intent = (state.launchActivityIntent ?: "").trim()
         if (state.launchActivityAfterInstall && isInstall && intent.isNotEmpty()) {
-            return "$gradle${joiner}&& adb shell am start -n \"$intent\""
+            val dev = device()
+            val adb = if (dev.isNotEmpty()) "adb -s '$dev'" else "adb"
+            return "$gradle${joiner}&& $adb shell am start -n \"$intent\""
         }
         return gradle
     }
