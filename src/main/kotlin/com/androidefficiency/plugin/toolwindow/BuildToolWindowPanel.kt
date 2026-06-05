@@ -12,7 +12,7 @@ import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskId
-import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskNotificationListenerAdapter
+import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskNotificationListener
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskType
 import com.intellij.openapi.externalSystem.service.notification.ExternalSystemProgressNotificationManager
 import com.intellij.openapi.ide.CopyPasteManager
@@ -30,6 +30,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
 import java.awt.*
+import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
 import javax.swing.*
 import javax.swing.border.TitledBorder
@@ -45,14 +46,15 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
         val disposable = Disposer.newDisposable("FastDeploy:GradleSync")
         Disposer.register(parentDisposable, disposable)
         ExternalSystemProgressNotificationManager.getInstance()
-            .addNotificationListener(object : ExternalSystemTaskNotificationListenerAdapter(null) {
+            .addNotificationListener(object : ExternalSystemTaskNotificationListener {
                 override fun onSuccess(id: ExternalSystemTaskId) {
                     if (id.type == ExternalSystemTaskType.RESOLVE_PROJECT &&
                         id.findProject() == project
                     ) {
                         ApplicationManager.getApplication().invokeLater { showContent() }
-                        refreshFlavorsAsync()
-                        refreshModulesAsync()
+                        // Only the project model changes on a Gradle sync — re-detect
+                        // modules & flavors. Devices / CLI availability are unaffected.
+                        refreshProjectModel()
                     }
                 }
             }, disposable)
@@ -120,6 +122,10 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
 
     private val runButton = JButton("Run in Terminal", AllIcons.Actions.Execute)
     private val copyButton = JButton("Copy", AllIcons.Actions.Copy)
+    private val pasteButton = JButton("Paste", AllIcons.Actions.MenuPaste)
+
+    /** Guards [saveAndRefresh] against the listener storm while [reloadUiFromSettings] runs. */
+    private var suppressListeners = false
 
     // Two-card root: a waiting splash while the project is still indexing, then the form.
     private val rootPanel = JPanel(CardLayout())
@@ -160,9 +166,11 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
     private fun wireReadiness() {
         DumbService.getInstance(project).runWhenSmart {
             showContent()
-            // Re-detect with the now-available Gradle model for accurate results.
-            refreshModulesAsync()
-            refreshFlavorsAsync()
+            // Single startup population point — detect modules & flavors against the
+            // now-available Gradle model, plus scan devices and probe the Android CLI.
+            // The loading card covers the form until this runs, so the dropdowns are
+            // never shown empty.
+            populateAll()
         }
     }
 
@@ -257,10 +265,8 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
         // Initial preview update
         updatePreview()
 
-        // Populate dropdowns and probe the Android CLI
-        refreshModulesAsync()
-        refreshDevicesAsync()
-        checkCliAvailabilityAsync()
+        // Dropdown population & CLI probe happen once from wireReadiness() → populateAll(),
+        // after the project is smart — no duplicate scans here.
 
         // Wire up all change listeners
         attachChangeListeners()
@@ -370,8 +376,7 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
             }
         }
 
-        flavorCombo.addItem("")  // empty = no flavor ("none")
-        refreshFlavorsAsync()
+        flavorCombo.addItem("")  // empty = no flavor ("none"); populated by populateAll()
 
         val flavorRow = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
             alignmentX = Component.LEFT_ALIGNMENT
@@ -478,8 +483,11 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
         }
         runButton.addActionListener { runBuild() }
         copyButton.addActionListener { copyCommandToClipboard() }
+        pasteButton.toolTipText = "Fill the form from a Fast Deploy command on the clipboard"
+        pasteButton.addActionListener { pasteCommandFromClipboard() }
         panel.add(runButton)
         panel.add(copyButton)
+        panel.add(pasteButton)
         return panel
     }
 
@@ -517,6 +525,7 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
     }
 
     private fun saveAndRefresh() {
+        if (suppressListeners) return
         persistSettings()
         updatePreview()
     }
@@ -589,6 +598,137 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
         } catch (e: Exception) {
             Messages.showErrorDialog(project, e.message, "Fast Deploy")
         }
+    }
+
+    /**
+     * Inverse of Copy: parse a Fast Deploy command from the clipboard and fill the form.
+     * Unrecognized clipboard content (or no string content) is a silent no-op — the UI
+     * is left untouched and no dialog is shown.
+     */
+    private fun pasteCommandFromClipboard() {
+        val text = try {
+            CopyPasteManager.getInstance().getContents(DataFlavor.stringFlavor) as? String
+        } catch (e: Exception) {
+            null
+        } ?: return
+        val parsed = BuildCommandComposer.parseCommand(text) ?: return
+        applyParsed(parsed)
+    }
+
+    /** Writes a [BuildCommandComposer.ParsedCommand] into settings, then reloads the form. */
+    private fun applyParsed(p: BuildCommandComposer.ParsedCommand) {
+        val s = settings.state
+        // Only switch to CLI mode if the `android` CLI is actually available (radio enabled);
+        // otherwise keep Gradle mode but still apply the parsed device.
+        s.useAndroidCli = p.useAndroidCli && cliRadio.isEnabled
+        s.targetDevice = p.targetDevice
+
+        // Gradle-specific fields are meaningless in CLI mode (greyed out), so leave them as-is there.
+        if (!p.useAndroidCli) {
+            s.selectedModule = p.module
+            s.gradleTask = p.gradleTask
+            s.buildType = p.buildType
+
+            // Use the dropdown if it lists this flavor; otherwise fall back to manual input
+            // so a flavor the current project hasn't detected still applies.
+            val inDropdown = p.flavor.isNotEmpty() &&
+                (0 until flavorCombo.itemCount).any { flavorCombo.getItemAt(it) == p.flavor }
+            if (p.flavor.isNotEmpty() && !inDropdown) {
+                s.useManualFlavor = true
+                s.manualFlavorInput = p.flavor
+                s.selectedFlavor = ""
+            } else {
+                s.useManualFlavor = false
+                s.manualFlavorInput = ""
+                s.selectedFlavor = p.flavor
+            }
+
+            s.offlineMode = "--offline" in p.recognizedFlags
+            s.parallelBuild = "--parallel" in p.recognizedFlags
+            s.configurationCache = "--configuration-cache" in p.recognizedFlags
+            s.buildCache = "--build-cache" in p.recognizedFlags
+            s.daemon = "--daemon" in p.recognizedFlags
+            s.configureOnDemand = "--configure-on-demand" in p.recognizedFlags
+            s.dryRun = "--dry-run" in p.recognizedFlags
+            s.stacktrace = "--stacktrace" in p.recognizedFlags
+            s.info = "--info" in p.recognizedFlags
+            s.debug = "--debug" in p.recognizedFlags
+            s.customFlags = p.customFlags
+
+            s.launchActivityAfterInstall = p.launchActivity
+            s.launchActivityIntent = p.launchIntent
+        }
+
+        // State is now authoritative — push it to the widgets without the listener storm.
+        suppressListeners = true
+        try {
+            reloadUiFromSettings()
+        } finally {
+            suppressListeners = false
+        }
+        updateModeUi()
+        updatePreview()
+    }
+
+    /** Inverse of [persistSettings]: push every control's value from `settings.state`. */
+    private fun reloadUiFromSettings() {
+        val s = settings.state
+        if (s.useAndroidCli) cliRadio.isSelected = true else gradleRadio.isSelected = true
+
+        // Ensure the serial is selectable even if the last adb scan didn't list it.
+        val dev = (s.targetDevice ?: "").trim()
+        if (dev.isNotEmpty() && (0 until deviceCombo.itemCount).none { deviceCombo.getItemAt(it) == dev }) {
+            deviceCombo.addItem(dev)
+        }
+        deviceCombo.selectedItem = dev
+
+        moduleCombo.selectedItem = s.selectedModule ?: "app"  // editable combo accepts off-list values
+
+        when (s.gradleTask ?: "install") {
+            "assemble" -> assembleRadio.isSelected = true
+            "bundle" -> bundleRadio.isSelected = true
+            else -> installRadio.isSelected = true
+        }
+        if ((s.buildType ?: "Debug") == "Release") releaseRadio.isSelected = true else debugRadio.isSelected = true
+
+        manualFlavorCheck.isSelected = s.useManualFlavor
+        manualFlavorField.text = s.manualFlavorInput ?: ""
+        flavorCombo.selectedItem = s.selectedFlavor ?: ""
+        flavorCombo.isEnabled = !s.useManualFlavor
+        manualFlavorField.isEnabled = s.useManualFlavor
+
+        offlineCheck.isSelected = s.offlineMode
+        parallelCheck.isSelected = s.parallelBuild
+        configCacheCheck.isSelected = s.configurationCache
+        buildCacheCheck.isSelected = s.buildCache
+        daemonCheck.isSelected = s.daemon
+        configOnDemandCheck.isSelected = s.configureOnDemand
+        stacktraceCheck.isSelected = s.stacktrace
+        infoCheck.isSelected = s.info
+        debugCheck.isSelected = s.debug
+        dryRunCheck.isSelected = s.dryRun
+        customFlagsField.text = s.customFlags ?: ""
+
+        launchActivityCheck.isSelected = s.launchActivityAfterInstall
+        launchIntentField.text = s.launchActivityIntent ?: ""
+        launchIntentField.isEnabled = s.launchActivityAfterInstall
+
+        // notifyCheck / reuseTerminalCheck are not part of a command — leave them as the user set them.
+    }
+
+    // ── Refresh orchestration ──────────────────────────────────────────────────
+
+    /** Re-detect what a Gradle sync can change: modules and flavors. */
+    private fun refreshProjectModel() {
+        refreshModulesAsync()
+        refreshFlavorsAsync()
+    }
+
+    /** Full startup population: project model + connected devices + CLI availability. */
+    private fun populateAll() {
+        refreshProjectModel()
+        refreshDevicesAsync()
+        checkCliAvailabilityAsync()
     }
 
     // ── Flavor detection ──────────────────────────────────────────────────────
@@ -677,7 +817,7 @@ class BuildToolWindowPanel(private val project: Project, parentDisposable: Dispo
             project, "Fast Deploy: Checking Android CLI…", false
         ) {
             override fun run(indicator: ProgressIndicator) {
-                val available = AndroidCliExecutor(project).isCliAvailable()
+                val available = AndroidCliExecutor.isCliAvailable()
                 ApplicationManager.getApplication().invokeLater {
                     cliRadio.isEnabled = available
                     cliRadio.toolTipText = if (available) null else "'android' CLI not found on PATH"

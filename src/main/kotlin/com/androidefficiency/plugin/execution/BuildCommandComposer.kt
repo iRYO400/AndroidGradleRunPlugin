@@ -170,5 +170,121 @@ class BuildCommandComposer(
             if (sb.isNotEmpty()) tokens.add(sb.toString())
             return tokens
         }
+
+        // ── Inverse parsing (clipboard → settings) ──────────────────────────────
+        // Mirrors getPreviewText(): the "Paste" button reverses a Fast-Deploy command
+        // string back into UI state. Only the format this composer produces is parsed;
+        // anything else returns null so the caller leaves the UI untouched.
+
+        /** The Gradle flag tokens this composer knows how to emit (see [buildFlags]). */
+        internal val KNOWN_GRADLE_FLAGS = listOf(
+            "--offline", "--parallel", "--configuration-cache", "--build-cache", "--daemon",
+            "--configure-on-demand", "--dry-run", "--stacktrace", "--info", "--debug"
+        )
+
+        /** Result of [parseCommand]; defaults are safe to apply even when only some fields parsed. */
+        data class ParsedCommand(
+            val useAndroidCli: Boolean,
+            val targetDevice: String = "",
+            val module: String = "app",
+            val gradleTask: String = "install",   // install | assemble | bundle
+            val buildType: String = "Debug",       // Debug | Release
+            val flavor: String = "",                // first char lower-cased; "" = none
+            val recognizedFlags: Set<String> = emptySet(),
+            val customFlags: String = "",
+            val launchActivity: Boolean = false,
+            val launchIntent: String = "",
+        )
+
+        private val MARKER_TAIL = Regex(""" ; printf %s "\$\?" > '[^']*'\s*$""")
+        private val CONTINUATION = Regex("""\\\n\s*""")
+        private val CLI_RE = Regex("""^android run(?: --device='([^']*)')?$""")
+        private val SERIAL_PREFIX_RE = Regex("""^ANDROID_SERIAL='([^']*)' """)
+        private val LAUNCH_TAIL_RE =
+            Regex("""\s*&&\s*adb(?: -s '([^']*)')? shell am start -n "([^"]*)"\s*$""")
+        private val TASK_PREFIXES = listOf("install", "assemble", "bundle")
+
+        /**
+         * Reverses a Fast-Deploy command string (as produced by [getPreviewText]) into a
+         * [ParsedCommand]. Returns null when the input is not a recognizable Fast-Deploy
+         * command, so the caller can no-op silently.
+         */
+        internal fun parseCommand(raw: String): ParsedCommand? {
+            var text = raw.trim()
+            if (text.isEmpty()) return null
+
+            // Defensive: drop a trailing completion-marker redirect (getTerminalCommand adds it).
+            text = MARKER_TAIL.replace(text, "")
+            // Collapse multi-line "\<newline><indent>" continuations into single spaces.
+            // Only the literal continuation is touched, so quoted values keep their spacing.
+            text = CONTINUATION.replace(text, " ").trim()
+
+            // ── Android CLI form ────────────────────────────────────────────────
+            CLI_RE.matchEntire(text)?.let { m ->
+                return ParsedCommand(useAndroidCli = true, targetDevice = m.groupValues[1])
+            }
+            if (text.startsWith("android run")) return null  // our CLI form but with junk
+
+            // ── Gradle form ─────────────────────────────────────────────────────
+            var device = ""
+            SERIAL_PREFIX_RE.find(text)?.let { m ->
+                device = m.groupValues[1]
+                text = text.removeRange(m.range)
+            }
+            if (!text.startsWith("./gradlew ")) return null
+            var body = text.removePrefix("./gradlew ").trim()
+
+            // Split off the launch-activity tail before tokenizing flags.
+            var launchActivity = false
+            var launchIntent = ""
+            LAUNCH_TAIL_RE.find(body)?.let { m ->
+                launchActivity = true
+                launchIntent = m.groupValues[2]
+                val adbSerial = m.groupValues[1]
+                if (device.isEmpty()) device = adbSerial  // ANDROID_SERIAL is canonical
+                body = body.removeRange(m.range).trim()
+            }
+            // A launch step that's present but malformed means this isn't our output.
+            if (!launchActivity && body.contains("am start")) return null
+
+            val tokens = splitCustomFlags(body)
+            val spec = tokens.firstOrNull() ?: return null
+            if (!spec.startsWith(":")) return null
+
+            // Reverse ":module:task<Flavor><Type>" — module may contain ':' (e.g. feature:login).
+            val afterColon = spec.removePrefix(":")
+            if (!afterColon.contains(":")) return null
+            val module = afterColon.substringBeforeLast(":")
+            val taskCamel = afterColon.substringAfterLast(":")
+            if (module.isEmpty() || taskCamel.isEmpty()) return null
+
+            val buildType = when {
+                taskCamel.endsWith("Debug") -> "Debug"
+                taskCamel.endsWith("Release") -> "Release"
+                else -> return null
+            }
+            val taskPrefix = TASK_PREFIXES.firstOrNull { taskCamel.startsWith(it) } ?: return null
+            val middle = taskCamel.substring(taskPrefix.length, taskCamel.length - buildType.length)
+            val flavor = middle.replaceFirstChar { it.lowercaseChar() }
+
+            val recognized = linkedSetOf<String>()
+            val unknown = mutableListOf<String>()
+            tokens.drop(1).forEach { tok ->
+                if (tok in KNOWN_GRADLE_FLAGS) recognized.add(tok) else unknown.add(tok)
+            }
+
+            return ParsedCommand(
+                useAndroidCli = false,
+                targetDevice = device,
+                module = module,
+                gradleTask = taskPrefix,
+                buildType = buildType,
+                flavor = flavor,
+                recognizedFlags = recognized,
+                customFlags = unknown.joinToString(" "),
+                launchActivity = launchActivity,
+                launchIntent = launchIntent,
+            )
+        }
     }
 }

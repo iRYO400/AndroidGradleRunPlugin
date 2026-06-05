@@ -1,6 +1,7 @@
 package com.androidefficiency.plugin.execution
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -237,6 +238,168 @@ class BuildCommandComposerTest {
     fun `cli command with device`() {
         assertEquals("android run --device='emulator-5554'", buildCliCommand("emulator-5554"))
     }
+
+    // ── Inverse parsing (parseCommand: command string → ParsedCommand) ─────────
+
+    @Test
+    fun `parse CLI without device`() {
+        val p = BuildCommandComposer.parseCommand("android run")!!
+        assertTrue(p.useAndroidCli)
+        assertEquals("", p.targetDevice)
+    }
+
+    @Test
+    fun `parse CLI with device`() {
+        val p = BuildCommandComposer.parseCommand("android run --device='emulator-5554'")!!
+        assertTrue(p.useAndroidCli)
+        assertEquals("emulator-5554", p.targetDevice)
+    }
+
+    @Test
+    fun `parse gradle minimal install Debug`() {
+        val p = BuildCommandComposer.parseCommand("./gradlew :app:installDebug")!!
+        assertEquals(false, p.useAndroidCli)
+        assertEquals("app", p.module)
+        assertEquals("install", p.gradleTask)
+        assertEquals("Debug", p.buildType)
+        assertEquals("", p.flavor)
+        assertTrue(p.recognizedFlags.isEmpty())
+        assertEquals("", p.customFlags)
+    }
+
+    @Test
+    fun `parse gradle with ANDROID_SERIAL prefix`() {
+        val p = BuildCommandComposer.parseCommand("ANDROID_SERIAL='R5CT80MX' ./gradlew :app:installDebug")!!
+        assertEquals("R5CT80MX", p.targetDevice)
+        assertEquals("install", p.gradleTask)
+    }
+
+    @Test
+    fun `parse assemble Release`() {
+        val p = BuildCommandComposer.parseCommand("./gradlew :app:assembleRelease")!!
+        assertEquals("assemble", p.gradleTask)
+        assertEquals("Release", p.buildType)
+        assertEquals("", p.flavor)
+    }
+
+    @Test
+    fun `parse bundle prod Release`() {
+        val p = BuildCommandComposer.parseCommand("./gradlew :app:bundleProdRelease")!!
+        assertEquals("bundle", p.gradleTask)
+        assertEquals("Release", p.buildType)
+        assertEquals("prod", p.flavor)
+    }
+
+    @Test
+    fun `parse flavor first char is lower-cased`() {
+        assertEquals("dev", BuildCommandComposer.parseCommand("./gradlew :app:installDevDebug")!!.flavor)
+        assertEquals("myFlavor", BuildCommandComposer.parseCommand("./gradlew :app:installMyFlavorDebug")!!.flavor)
+    }
+
+    @Test
+    fun `parse module with colon`() {
+        val p = BuildCommandComposer.parseCommand("./gradlew :feature:login:assembleStagingDebug")!!
+        assertEquals("feature:login", p.module)
+        assertEquals("assemble", p.gradleTask)
+        assertEquals("staging", p.flavor)
+        assertEquals("Debug", p.buildType)
+    }
+
+    @Test
+    fun `parse recognized flags from multi-line form`() {
+        val cmd = "./gradlew :app:installDebug \\\n    --offline \\\n    --parallel"
+        val p = BuildCommandComposer.parseCommand(cmd)!!
+        assertTrue(p.recognizedFlags.contains("--offline"))
+        assertTrue(p.recognizedFlags.contains("--parallel"))
+        assertEquals("", p.customFlags)
+    }
+
+    @Test
+    fun `parse unknown flags go to customFlags`() {
+        val cmd = "./gradlew :app:installDebug \\\n    --offline \\\n    -PmyProp=value \\\n    --no-tests"
+        val p = BuildCommandComposer.parseCommand(cmd)!!
+        assertEquals(setOf("--offline"), p.recognizedFlags)
+        assertEquals("-PmyProp=value --no-tests", p.customFlags)
+    }
+
+    @Test
+    fun `parse quoted custom flag is preserved as one token`() {
+        val cmd = "./gradlew :app:installDebug \\\n    -Pkey=\"a b\""
+        val p = BuildCommandComposer.parseCommand(cmd)!!
+        assertEquals("-Pkey=\"a b\"", p.customFlags)
+    }
+
+    @Test
+    fun `parse launch tail with plain adb`() {
+        val cmd = "./gradlew :app:installDebug \\\n  && adb shell am start -n \"com.foo/com.foo.Main\""
+        val p = BuildCommandComposer.parseCommand(cmd)!!
+        assertTrue(p.launchActivity)
+        assertEquals("com.foo/com.foo.Main", p.launchIntent)
+    }
+
+    @Test
+    fun `parse launch tail with adb -s device`() {
+        val cmd = "ANDROID_SERIAL='emulator-5554' ./gradlew :app:installDebug \\\n  " +
+            "&& adb -s 'emulator-5554' shell am start -n \"com.foo/Main\""
+        val p = BuildCommandComposer.parseCommand(cmd)!!
+        assertEquals("emulator-5554", p.targetDevice)
+        assertTrue(p.launchActivity)
+        assertEquals("com.foo/Main", p.launchIntent)
+    }
+
+    @Test
+    fun `parse strips trailing printf completion marker`() {
+        val cmd = "./gradlew :app:installDebug ; printf %s \"\$?\" > '/tmp/fastdeploy-exit.tmp'"
+        val p = BuildCommandComposer.parseCommand(cmd)!!
+        assertEquals("install", p.gradleTask)
+        assertEquals("", p.customFlags)
+    }
+
+    @Test
+    fun `parse full round-trip of a rich gradle command`() {
+        val cmd = "ANDROID_SERIAL='emulator-5554' ./gradlew :feature:login:installDevDebug \\\n" +
+            "    --offline \\\n    --parallel \\\n    -Pfoo=bar \\\n" +
+            "  && adb -s 'emulator-5554' shell am start -n \"com.foo/com.foo.Main\""
+        val p = BuildCommandComposer.parseCommand(cmd)!!
+        assertEquals(false, p.useAndroidCli)
+        assertEquals("emulator-5554", p.targetDevice)
+        assertEquals("feature:login", p.module)
+        assertEquals("install", p.gradleTask)
+        assertEquals("Debug", p.buildType)
+        assertEquals("dev", p.flavor)
+        assertEquals(setOf("--offline", "--parallel"), p.recognizedFlags)
+        assertEquals("-Pfoo=bar", p.customFlags)
+        assertTrue(p.launchActivity)
+        assertEquals("com.foo/com.foo.Main", p.launchIntent)
+    }
+
+    // ── parseCommand: silent no-op (null) cases ─────────────────────────────────
+
+    @Test
+    fun `parse returns null for blank`() = assertNull(BuildCommandComposer.parseCommand("   "))
+
+    @Test
+    fun `parse returns null for unrelated command`() = assertNull(BuildCommandComposer.parseCommand("git status"))
+
+    @Test
+    fun `parse returns null for unknown gradle task`() =
+        assertNull(BuildCommandComposer.parseCommand("./gradlew :app:foobarDebug"))
+
+    @Test
+    fun `parse returns null for unknown build type`() =
+        assertNull(BuildCommandComposer.parseCommand("./gradlew :app:installPurple"))
+
+    @Test
+    fun `parse returns null for CLI form with junk`() =
+        assertNull(BuildCommandComposer.parseCommand("android run --foo"))
+
+    @Test
+    fun `parse returns null for gradlew without task spec`() =
+        assertNull(BuildCommandComposer.parseCommand("./gradlew"))
+
+    @Test
+    fun `parse returns null for malformed am start tail`() =
+        assertNull(BuildCommandComposer.parseCommand("./gradlew :app:installDebug && adb shell am start"))
 
     // ── Helper functions (mirror BuildCommandComposer logic) ──────────────────
 
