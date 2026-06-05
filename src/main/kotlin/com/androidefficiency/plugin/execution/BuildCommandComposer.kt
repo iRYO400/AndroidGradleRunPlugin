@@ -136,6 +136,24 @@ class BuildCommandComposer(
         }
     }
 
+    /**
+     * Result of [parseCommand] (the inverse of [getPreviewText]); defaults are safe to
+     * apply even when only some fields were parsed. Declared on the class (not the
+     * companion) so it's referenced as `BuildCommandComposer.ParsedCommand`.
+     */
+    data class ParsedCommand(
+        val useAndroidCli: Boolean,
+        val targetDevice: String = "",
+        val module: String = "app",
+        val gradleTask: String = "install",   // install | assemble | bundle
+        val buildType: String = "Debug",       // Debug | Release
+        val flavor: String = "",                // first char lower-cased; "" = none
+        val recognizedFlags: Set<String> = emptySet(),
+        val customFlags: String = "",
+        val launchActivity: Boolean = false,
+        val launchIntent: String = "",
+    )
+
     companion object {
         /**
          * Splits a custom-flags string into tokens, treating single- and double-quoted
@@ -180,20 +198,6 @@ class BuildCommandComposer(
         internal val KNOWN_GRADLE_FLAGS = listOf(
             "--offline", "--parallel", "--configuration-cache", "--build-cache", "--daemon",
             "--configure-on-demand", "--dry-run", "--stacktrace", "--info", "--debug"
-        )
-
-        /** Result of [parseCommand]; defaults are safe to apply even when only some fields parsed. */
-        data class ParsedCommand(
-            val useAndroidCli: Boolean,
-            val targetDevice: String = "",
-            val module: String = "app",
-            val gradleTask: String = "install",   // install | assemble | bundle
-            val buildType: String = "Debug",       // Debug | Release
-            val flavor: String = "",                // first char lower-cased; "" = none
-            val recognizedFlags: Set<String> = emptySet(),
-            val customFlags: String = "",
-            val launchActivity: Boolean = false,
-            val launchIntent: String = "",
         )
 
         private val MARKER_TAIL = Regex(""" ; printf %s "\$\?" > '[^']*'\s*$""")
