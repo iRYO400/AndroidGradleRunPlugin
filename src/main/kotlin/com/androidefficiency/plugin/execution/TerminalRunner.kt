@@ -33,6 +33,9 @@ object TerminalRunner {
                     createNewTab(project, view)
                 }
                 widget.executeCommand(command)
+                // Bring the Terminal tool window forward & focus it so the user lands
+                // on the running command (the reuse path doesn't focus on its own).
+                ToolWindowManager.getInstance(project).getToolWindow("Terminal")?.activate(null)
             } catch (e: Exception) {
                 Messages.showErrorDialog(
                     project,
