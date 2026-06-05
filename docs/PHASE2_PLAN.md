@@ -56,8 +56,10 @@ Android Efficiency (`PluginSettingsConfigurable`).
 
 ## Прогресс
 
-- [ ] Удалить PluginSettingsConfigurable + extension в plugin.xml
-- [ ] BuildCommandComposer: ветка CLI/Gradle + device
-- [ ] BuildToolWindowPanel: Run via + Device + grey-out
-- [ ] Тесты BuildCommandComposerTest
-- [ ] Сборка/тесты зелёные (на CI/второй машине)
+- [x] Удалить PluginSettingsConfigurable + extension в plugin.xml
+- [x] BuildCommandComposer: ветка CLI/Gradle + device
+- [x] BuildToolWindowPanel: Run via + Device + grey-out
+- [x] Тесты BuildCommandComposerTest
+- [x] Закоммичено (b547035)
+- [ ] Релиз: bump версии (→0.8.0) + push + тег + проверить CI
+- [ ] Smoke-тест в Android Studio (сборка/тесты зелёные)
